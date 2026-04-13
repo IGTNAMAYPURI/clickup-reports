@@ -1,0 +1,7 @@
+{
+  "inactivity_days": 3,
+  "open_task_days": 7,
+  "rework_count_flag": 2,
+  "backfill_concurrency": 2,
+  "workload_imbalance_pct": 35
+}

@@ -1,0 +1,867 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: ClickUp Developer & Team Reporting System - Serverless pipeline for automated developer productivity reporting
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        NODE_ENV: !Ref Environment
+        SECRETS_ARN: !Ref SecretsArn
+        MONGODB_SECRET_KEY: mongodb_connection_string
+        CLICKUP_SECRET_KEY: clickup_api_token
+        GOOGLE_OAUTH_SECRET_KEY: google_oauth2_refresh_token
+        API_KEY_SECRET_KEY: api_keys
+
+Parameters:
+  Environment:
+    Type: String
+    Default: staging
+    AllowedValues:
+      - staging
+      - production
+    Description: Deployment environment
+
+  SecretsArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret containing all application secrets
+
+  MongoDbAtlasNatIp:
+    Type: String
+    Default: ''
+    Description: NAT Gateway Elastic IP for MongoDB Atlas IP allowlisting
+
+  AlarmNotificationTopicArn:
+    Type: String
+    Default: ''
+    Description: Optional SNS topic ARN for CloudWatch alarm notifications
+
+Conditions:
+  HasAlarmNotificationTopic: !Not [!Equals [!Ref AlarmNotificationTopicArn, '']]
+
+Resources:
+
+  # ============================================================
+  # Shared Lambda Layer
+  # ============================================================
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub clickup-reporting-shared-${Environment}
+      Description: Shared modules - DB connection, ClickUp client, Sheets client, report builder, chart builder, types, date utils, logger
+      ContentUri: src/
+      CompatibleRuntimes:
+        - nodejs20.x
+      RetentionPolicy: Retain
+    Metadata:
+      BuildMethod: nodejs20.x
+
+  # ============================================================
+  # SQS Dead Letter Queues
+  # ============================================================
+  SyncDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub clickup-sync-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  DailyReportDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub daily-report-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  WeeklyReportDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub weekly-report-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  MonthlyReportDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub monthly-report-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  ManualTriggerDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub manual-trigger-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  BackfillDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub backfill-dlq-${Environment}
+      MessageRetentionPeriod: 1209600
+
+  # ============================================================
+  # Lambda Functions
+  # ============================================================
+  SyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub clickup-sync-${Environment}
+      Handler: src/lambdas/clickup-sync/handler.handler
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 600
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt SyncDLQ.Arn
+      Role: !GetAtt SyncFunctionRole.Arn
+      Events:
+        ScheduleSync:
+          Type: Schedule
+          Properties:
+            Schedule: rate(30 minutes)
+            Description: Sync ClickUp data every 30 minutes
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/clickup-sync/handler.ts
+
+  DailyReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub daily-report-${Environment}
+      Handler: src/lambdas/daily-report/handler.handler
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 300
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt DailyReportDLQ.Arn
+      Role: !GetAtt DailyReportFunctionRole.Arn
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(5 0 * * ? *)
+            Description: Generate daily report at 00:05 UTC
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/daily-report/handler.ts
+
+  WeeklyReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub weekly-report-${Environment}
+      Handler: src/lambdas/weekly-report/handler.handler
+      CodeUri: .
+      MemorySize: 512
+      Timeout: 600
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt WeeklyReportDLQ.Arn
+      Role: !GetAtt WeeklyReportFunctionRole.Arn
+      Events:
+        WeeklySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(10 0 ? * MON *)
+            Description: Generate weekly report at 00:10 UTC every Monday
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/weekly-report/handler.ts
+
+  MonthlyReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub monthly-report-${Environment}
+      Handler: src/lambdas/monthly-report/handler.handler
+      CodeUri: .
+      MemorySize: 1024
+      Timeout: 900
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt MonthlyReportDLQ.Arn
+      Role: !GetAtt MonthlyReportFunctionRole.Arn
+      Events:
+        MonthlySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(15 0 1 * ? *)
+            Description: Generate monthly report at 00:15 UTC on the 1st
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/monthly-report/handler.ts
+
+  ManualTriggerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub manual-trigger-${Environment}
+      Handler: src/lambdas/manual-trigger/handler.handler
+      CodeUri: .
+      MemorySize: 1024
+      Timeout: 900
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt ManualTriggerDLQ.Arn
+      Role: !GetAtt ManualTriggerFunctionRole.Arn
+      Events:
+        GenerateReport:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportingApi
+            Path: /reports/generate
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/manual-trigger/handler.ts
+
+  BackfillFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub backfill-${Environment}
+      Handler: src/lambdas/backfill/handler.handler
+      CodeUri: .
+      MemorySize: 1024
+      Timeout: 900
+      Layers:
+        - !Ref SharedLayer
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt BackfillDLQ.Arn
+      Role: !GetAtt BackfillFunctionRole.Arn
+      Events:
+        BackfillReport:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportingApi
+            Path: /reports/backfill
+            Method: POST
+            Auth:
+              ApiKeyRequired: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2022
+        EntryPoints:
+          - src/lambdas/backfill/handler.ts
+
+  # ============================================================
+  # API Gateway
+  # ============================================================
+  ReportingApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub clickup-reporting-api-${Environment}
+      StageName: !Ref Environment
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          UsagePlanName: !Sub clickup-reporting-usage-plan-${Environment}
+          Throttle:
+            BurstLimit: 10
+            RateLimit: 5
+
+  # ============================================================
+  # IAM Roles — Least Privilege per Lambda
+  # ============================================================
+
+  # Base policy for Secrets Manager access (shared across all roles)
+  SecretsManagerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub clickup-reporting-secrets-${Environment}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+            Resource: !Ref SecretsArn
+
+  # Base policy for CloudWatch metrics and logs (shared across all roles)
+  ObservabilityPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub clickup-reporting-observability-${Environment}
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+            Condition:
+              StringEquals:
+                cloudwatch:namespace: !Sub ClickUpReporting/${Environment}
+
+  SyncFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub clickup-sync-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: SyncDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt SyncDLQ.Arn
+
+  DailyReportFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub daily-report-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: DailyReportDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt DailyReportDLQ.Arn
+
+  WeeklyReportFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub weekly-report-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: WeeklyReportDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt WeeklyReportDLQ.Arn
+
+  MonthlyReportFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub monthly-report-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: MonthlyReportDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt MonthlyReportDLQ.Arn
+
+  ManualTriggerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub manual-trigger-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: ManualTriggerDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ManualTriggerDLQ.Arn
+
+  BackfillFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub backfill-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref SecretsManagerPolicy
+        - !Ref ObservabilityPolicy
+      Policies:
+        - PolicyName: BackfillDLQAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt BackfillDLQ.Arn
+
+  # ============================================================
+  # CloudWatch Alarms
+  # ============================================================
+
+  # --- Lambda Error Rate Alarms ---
+  SyncErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub clickup-sync-errors-${Environment}
+      AlarmDescription: Sync Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SyncFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  DailyReportErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub daily-report-errors-${Environment}
+      AlarmDescription: Daily Report Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DailyReportFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  WeeklyReportErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub weekly-report-errors-${Environment}
+      AlarmDescription: Weekly Report Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WeeklyReportFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  MonthlyReportErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub monthly-report-errors-${Environment}
+      AlarmDescription: Monthly Report Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MonthlyReportFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  ManualTriggerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub manual-trigger-errors-${Environment}
+      AlarmDescription: Manual Trigger Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ManualTriggerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  BackfillErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub backfill-errors-${Environment}
+      AlarmDescription: Backfill Lambda error rate exceeded threshold
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref BackfillFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  # --- Lambda Duration > 80% Timeout Alarms ---
+  SyncDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub clickup-sync-duration-${Environment}
+      AlarmDescription: Sync Lambda duration exceeded 80% of 600s timeout (480s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref SyncFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 480000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  DailyReportDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub daily-report-duration-${Environment}
+      AlarmDescription: Daily Report Lambda duration exceeded 80% of 300s timeout (240s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DailyReportFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 240000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  WeeklyReportDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub weekly-report-duration-${Environment}
+      AlarmDescription: Weekly Report Lambda duration exceeded 80% of 600s timeout (480s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref WeeklyReportFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 480000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  MonthlyReportDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub monthly-report-duration-${Environment}
+      AlarmDescription: Monthly Report Lambda duration exceeded 80% of 900s timeout (720s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref MonthlyReportFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 720000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  ManualTriggerDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub manual-trigger-duration-${Environment}
+      AlarmDescription: Manual Trigger Lambda duration exceeded 80% of 900s timeout (720s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ManualTriggerFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 720000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  BackfillDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub backfill-duration-${Environment}
+      AlarmDescription: Backfill Lambda duration exceeded 80% of 900s timeout (720s)
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref BackfillFunction
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 720000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  # --- DLQ Message Count > 0 Alarms ---
+  SyncDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub clickup-sync-dlq-${Environment}
+      AlarmDescription: Messages in Sync DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt SyncDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  DailyReportDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub daily-report-dlq-${Environment}
+      AlarmDescription: Messages in Daily Report DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DailyReportDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  WeeklyReportDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub weekly-report-dlq-${Environment}
+      AlarmDescription: Messages in Weekly Report DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt WeeklyReportDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  MonthlyReportDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub monthly-report-dlq-${Environment}
+      AlarmDescription: Messages in Monthly Report DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt MonthlyReportDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  ManualTriggerDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub manual-trigger-dlq-${Environment}
+      AlarmDescription: Messages in Manual Trigger DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt ManualTriggerDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  BackfillDLQAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub backfill-dlq-${Environment}
+      AlarmDescription: Messages in Backfill DLQ - failed invocations detected
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt BackfillDLQ.QueueName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  # --- Sync Staleness Alarm (> 60 minutes since last successful sync) ---
+  SyncStalenessAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub clickup-sync-staleness-${Environment}
+      AlarmDescription: No successful ClickUp sync in the last 60 minutes
+      Namespace: !Sub ClickUpReporting/${Environment}
+      MetricName: TasksFetched
+      Statistic: SampleCount
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: !If [HasAlarmNotificationTopic, [!Ref AlarmNotificationTopicArn], !Ref 'AWS::NoValue']
+
+  # ============================================================
+  # Outputs
+  # ============================================================
+Outputs:
+  ReportingApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${ReportingApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+
+  ReportingApiId:
+    Description: API Gateway ID
+    Value: !Ref ReportingApi
+
+  SharedLayerArn:
+    Description: Shared Lambda Layer ARN
+    Value: !Ref SharedLayer
+
+  SyncFunctionArn:
+    Description: Sync Lambda ARN
+    Value: !GetAtt SyncFunction.Arn
+
+  DailyReportFunctionArn:
+    Description: Daily Report Lambda ARN
+    Value: !GetAtt DailyReportFunction.Arn
+
+  WeeklyReportFunctionArn:
+    Description: Weekly Report Lambda ARN
+    Value: !GetAtt WeeklyReportFunction.Arn
+
+  MonthlyReportFunctionArn:
+    Description: Monthly Report Lambda ARN
+    Value: !GetAtt MonthlyReportFunction.Arn
+
+  ManualTriggerFunctionArn:
+    Description: Manual Trigger Lambda ARN
+    Value: !GetAtt ManualTriggerFunction.Arn
+
+  BackfillFunctionArn:
+    Description: Backfill Lambda ARN
+    Value: !GetAtt BackfillFunction.Arn

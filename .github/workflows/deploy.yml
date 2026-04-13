@@ -1,0 +1,137 @@
+name: Deploy ClickUp Reporting
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  NODE_VERSION: '20'
+  SAM_CLI_TELEMETRY: '0'
+
+jobs:
+  lint-test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run Prettier check
+        run: npm run format:check
+
+      - name: Run Jest unit tests
+        run: npm run test:unit -- --ci --coverage
+
+  deploy:
+    name: Deploy
+    needs: lint-test
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    env:
+      ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Detect shared layer changes
+        id: layer-changes
+        run: |
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          LAYER_CHANGED=false
+          for file in $CHANGED_FILES; do
+            case "$file" in
+              src/services/*|src/types/*|src/utils/*|src/config/*)
+                LAYER_CHANGED=true
+                break
+                ;;
+            esac
+          done
+          echo "changed=$LAYER_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: SAM build
+        run: sam build --template-file template.yaml
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name clickup-reporting-${{ env.ENVIRONMENT }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              Environment=${{ env.ENVIRONMENT }} \
+              SecretsArn=${{ secrets.SECRETS_ARN }} \
+            --tags \
+              Project=clickup-reporting \
+              Environment=${{ env.ENVIRONMENT }}
+
+      - name: Publish new Lambda Layer version
+        if: steps.layer-changes.outputs.changed == 'true'
+        run: |
+          echo "Shared layer code changed — publishing new layer version"
+          STACK_NAME="clickup-reporting-${{ env.ENVIRONMENT }}"
+
+          LAYER_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='SharedLayerArn'].OutputValue" \
+            --output text)
+
+          echo "Current layer ARN: $LAYER_ARN"
+
+          FUNCTIONS=(
+            "clickup-sync-${{ env.ENVIRONMENT }}"
+            "daily-report-${{ env.ENVIRONMENT }}"
+            "weekly-report-${{ env.ENVIRONMENT }}"
+            "monthly-report-${{ env.ENVIRONMENT }}"
+            "manual-trigger-${{ env.ENVIRONMENT }}"
+            "backfill-${{ env.ENVIRONMENT }}"
+          )
+
+          for FUNC in "${FUNCTIONS[@]}"; do
+            echo "Updating $FUNC with layer $LAYER_ARN"
+            aws lambda update-function-configuration \
+              --function-name "$FUNC" \
+              --layers "$LAYER_ARN" \
+              --no-cli-pager || echo "Warning: failed to update $FUNC"
+          done
