@@ -4,7 +4,7 @@
   "description": "Serverless ClickUp Developer & Team Reporting System",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc & tsc-alias",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' 'tests/**/*.ts' --fix",
     "format": "prettier --write 'src/**/*.ts' 'tests/**/*.ts'",
@@ -34,6 +34,7 @@
     "prettier": "^3.3.0",
     "ts-jest": "^29.1.4",
     "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16",
     "typescript": "^5.4.5"
   },
   "engines": {
