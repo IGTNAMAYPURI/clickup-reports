@@ -14,9 +14,10 @@ import {
   type MetricDatum,
   type StandardUnit,
 } from '@aws-sdk/client-cloudwatch';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 
 const NAMESPACE = 'ClickUpReporting';
-const client = new CloudWatchClient({});
+const client = new CloudWatchClient(getAwsClientConfig());
 
 /**
  * Emits a single custom CloudWatch metric.

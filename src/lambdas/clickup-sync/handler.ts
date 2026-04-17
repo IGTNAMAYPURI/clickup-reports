@@ -19,11 +19,12 @@ import { ClickUpClient } from '@src/services/clickup/client';
 import { getDb } from '@src/services/db/connection';
 import { normalizeTask } from '@src/services/sync/task-normalizer';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 import type { ClickUpTask } from '@src/types/clickup';
 import type { SyncCursor } from '@src/types/db';
 
 const NAMESPACE = 'ClickUpReporting';
-const cloudwatch = new CloudWatchClient({});
+const cloudwatch = new CloudWatchClient(getAwsClientConfig());
 
 /**
  * Resolves the full set of list IDs to sync for a given space entry.

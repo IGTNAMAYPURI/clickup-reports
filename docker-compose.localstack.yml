@@ -1,0 +1,43 @@
+version: "3.8"
+
+services:
+  localstack:
+    image: localstack/localstack-pro
+    container_name: clickup-reporting-localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=lambda,apigateway,secretsmanager,cloudwatch,sqs,events,iam,logs,s3
+      - LOCALSTACK_AUTH_TOKEN=ls-ViDIVAFA-viha-culo-kOJi-8145foWu648c
+      - DEBUG=0
+      - LAMBDA_EXECUTOR=docker-reuse
+      - LAMBDA_DOCKER_NETWORK=clickup-reporting-net
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DEFAULT_REGION=us-east-1
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack-init:/etc/localstack/init/ready.d"
+      - localstack-data:/var/lib/localstack
+    networks:
+      - clickup-reporting-net
+
+  mongodb:
+    image: mongo:7
+    container_name: clickup-reporting-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: clickup_reporting
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - clickup-reporting-net
+
+volumes:
+  localstack-data:
+  mongo-data:
+
+networks:
+  clickup-reporting-net:
+    driver: bridge

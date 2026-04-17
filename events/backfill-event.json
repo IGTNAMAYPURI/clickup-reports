@@ -1,0 +1,26 @@
+{
+  "resource": "/reports/backfill",
+  "path": "/reports/backfill",
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "x-api-key": "local-dev-api-key-12345"
+  },
+  "queryStringParameters": null,
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {
+    "resourceId": "test",
+    "resourcePath": "/reports/backfill",
+    "httpMethod": "POST",
+    "requestId": "test-request-id",
+    "accountId": "000000000000",
+    "stage": "staging",
+    "identity": {
+      "apiKey": "local-dev-api-key-12345",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "body": "{\"from_date\":\"2025-01-01T00:00:00Z\",\"to_date\":\"2025-01-31T23:59:59Z\"}",
+  "isBase64Encoded": false
+}

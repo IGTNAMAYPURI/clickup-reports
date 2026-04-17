@@ -39,12 +39,13 @@ import {
 import { DEFAULT_SHEET_FORMAT, formatTaskBreakdownData } from '@src/services/sheets/formatter';
 import { enumeratePeriods, formatSheetName, getPriorPeriod } from '@src/utils/date.utils';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 import type { Developer, TaskSnapshot, Team, ReportSnapshot } from '@src/types/db';
 import type { DeveloperReport, ReportPeriod } from '@src/types/report';
 
 const NAMESPACE = 'ClickUpReporting';
-const cloudwatch = new CloudWatchClient({});
-const secretsClient = new SecretsManagerClient({});
+const cloudwatch = new CloudWatchClient(getAwsClientConfig());
+const secretsClient = new SecretsManagerClient(getAwsClientConfig());
 
 interface BackfillRequest {
   from_date: string; // ISO 8601

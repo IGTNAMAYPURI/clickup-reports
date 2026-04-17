@@ -12,7 +12,18 @@
     "test": "jest",
     "test:unit": "jest --config jest.unit.config.ts",
     "test:property": "jest --config jest.property.config.ts",
-    "test:integration": "jest --config jest.integration.config.ts"
+    "test:integration": "jest --config jest.integration.config.ts",
+    "local:up": "docker compose -f docker-compose.localstack.yml up -d",
+    "local:down": "docker compose -f docker-compose.localstack.yml down",
+    "local:logs": "docker compose -f docker-compose.localstack.yml logs -f",
+    "local:seed": "node scripts/seed-mongo.js",
+    "local:api": "sam local start-api --env-vars .env.local --port 3000",
+    "local:api:network": "sam local start-api --docker-network clickup-report_clickup-reporting-net --env-vars .env.local --port 3000",
+    "local:invoke:sync": "sam local invoke SyncFunction --docker-network clickup-report_clickup-reporting-net --env-vars .env.local --event events/sync-event.json",
+    "local:invoke:daily": "sam local invoke DailyReportFunction --docker-network clickup-report_clickup-reporting-net --env-vars .env.local --event events/daily-report-event.json",
+    "local:invoke:manual": "sam local invoke ManualTriggerFunction --docker-network clickup-report_clickup-reporting-net --env-vars .env.local --event events/manual-trigger-event.json",
+    "local:invoke:backfill": "sam local invoke BackfillFunction --docker-network clickup-report_clickup-reporting-net --env-vars .env.local --event events/backfill-event.json",
+    "local:reset": "docker compose -f docker-compose.localstack.yml down -v && docker compose -f docker-compose.localstack.yml up -d"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch": "^3.600.0",
@@ -28,6 +39,7 @@
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^7.13.0",
     "@typescript-eslint/parser": "^7.13.0",
+    "esbuild": "^0.21.5",
     "eslint": "^8.57.0",
     "fast-check": "^3.19.0",
     "jest": "^29.7.0",

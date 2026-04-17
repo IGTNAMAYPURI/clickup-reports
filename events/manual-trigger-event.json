@@ -1,0 +1,26 @@
+{
+  "resource": "/reports/generate",
+  "path": "/reports/generate",
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "x-api-key": "local-dev-api-key-12345"
+  },
+  "queryStringParameters": null,
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {
+    "resourceId": "test",
+    "resourcePath": "/reports/generate",
+    "httpMethod": "POST",
+    "requestId": "test-request-id",
+    "accountId": "000000000000",
+    "stage": "staging",
+    "identity": {
+      "apiKey": "local-dev-api-key-12345",
+      "sourceIp": "127.0.0.1"
+    }
+  },
+  "body": "{\"report_type\":\"daily\",\"period_start\":\"2025-01-01T00:00:00Z\",\"period_end\":\"2025-01-01T23:59:59Z\"}",
+  "isBase64Encoded": false
+}

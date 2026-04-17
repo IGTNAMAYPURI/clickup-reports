@@ -1,2 +1,8 @@
 node_modules
 dist
+
+# LocalStack local dev
+.env.local
+localstack-data/
+mongo-data/
+.aws-sam

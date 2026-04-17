@@ -17,6 +17,7 @@ import {
 import type { ClickUpTask, ClickUpMember, TimeInStatusResponse } from '@src/types/clickup';
 import { withRetry } from '@src/utils/retry';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 
 const CLICKUP_BASE_URL = 'https://api.clickup.com/api/v2';
 const MAX_CONCURRENCY = 5;
@@ -114,7 +115,7 @@ export class Semaphore {
 
 let cachedToken: string | null = null;
 
-const secretsClient = new SecretsManagerClient({});
+const secretsClient = new SecretsManagerClient(getAwsClientConfig());
 
 export async function getClickUpToken(
   secretId: string = process.env.CLICKUP_SECRET_ID ?? 'clickup-api-token',

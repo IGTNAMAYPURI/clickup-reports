@@ -1,0 +1,133 @@
+### ============================================================
+### ClickUp Reporting API — Local Development Tests
+### Base URL: http://localhost:3000 (sam local start-api)
+### ============================================================
+
+@baseUrl = http://localhost:3000
+@apiKey = local-dev-api-key-12345
+
+### ============================================================
+### Manual Trigger — Generate Daily Report
+### ============================================================
+
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "daily",
+  "period_start": "2025-01-01T00:00:00Z",
+  "period_end": "2025-01-01T23:59:59Z"
+}
+
+### ============================================================
+### Manual Trigger — Generate Weekly Report
+### ============================================================
+
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "weekly",
+  "period_start": "2025-01-06T00:00:00Z",
+  "period_end": "2025-01-12T23:59:59Z"
+}
+
+### ============================================================
+### Manual Trigger — Generate Monthly Report
+### ============================================================
+
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "monthly",
+  "period_start": "2025-01-01T00:00:00Z",
+  "period_end": "2025-01-31T23:59:59Z"
+}
+
+### ============================================================
+### Backfill — Generate Reports for a Date Range
+### ============================================================
+
+POST {{baseUrl}}/reports/backfill
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "from_date": "2025-01-01T00:00:00Z",
+  "to_date": "2025-01-31T23:59:59Z"
+}
+
+### ============================================================
+### Error Cases
+### ============================================================
+
+### Missing API key — expect 401
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+
+{
+  "report_type": "daily",
+  "period_start": "2025-01-01T00:00:00Z",
+  "period_end": "2025-01-01T23:59:59Z"
+}
+
+### Invalid API key — expect 401
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: wrong-key
+
+{
+  "report_type": "daily",
+  "period_start": "2025-01-01T00:00:00Z",
+  "period_end": "2025-01-01T23:59:59Z"
+}
+
+### Missing request body — expect 400
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+### Invalid report_type — expect 400
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "yearly",
+  "period_start": "2025-01-01T00:00:00Z",
+  "period_end": "2025-01-01T23:59:59Z"
+}
+
+### Missing period_end — expect 400
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "daily",
+  "period_start": "2025-01-01T00:00:00Z"
+}
+
+### period_start after period_end — expect 400
+POST {{baseUrl}}/reports/generate
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "report_type": "daily",
+  "period_start": "2025-01-10T00:00:00Z",
+  "period_end": "2025-01-01T23:59:59Z"
+}
+
+### Backfill — missing from_date — expect 400
+POST {{baseUrl}}/reports/backfill
+Content-Type: application/json
+x-api-key: {{apiKey}}
+
+{
+  "to_date": "2025-01-31T23:59:59Z"
+}

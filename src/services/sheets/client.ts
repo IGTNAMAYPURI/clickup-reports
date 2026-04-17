@@ -17,6 +17,7 @@ import {
 import type { SheetFormat, ChartSpec } from '@src/types/sheets';
 import { withRetry } from '@src/utils/retry';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 
 const RETRY_MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 1_000;
@@ -40,7 +41,7 @@ interface CachedAccessToken {
 let cachedCredentials: OAuthCredentials | null = null;
 let cachedAccessToken: CachedAccessToken | null = null;
 
-const secretsClient = new SecretsManagerClient({});
+const secretsClient = new SecretsManagerClient(getAwsClientConfig());
 
 /**
  * Retrieves OAuth2 credentials (client_id, client_secret, refresh_token)

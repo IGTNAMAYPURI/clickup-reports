@@ -30,11 +30,12 @@ import {
 import { DEFAULT_SHEET_FORMAT, formatTaskBreakdownData } from '@src/services/sheets/formatter';
 import { getDailyPeriod, getPriorPeriod, formatSheetName } from '@src/utils/date.utils';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 import type { Developer, TaskSnapshot, Team, ReportSnapshot } from '@src/types/db';
 import type { DeveloperReport, ReportPeriod } from '@src/types/report';
 
 const NAMESPACE = 'ClickUpReporting';
-const cloudwatch = new CloudWatchClient({});
+const cloudwatch = new CloudWatchClient(getAwsClientConfig());
 
 /**
  * Queries all task_snapshots within a period across all developers.

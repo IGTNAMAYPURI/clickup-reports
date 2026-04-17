@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-secrets-manager';
 import { withRetry } from '@src/utils/retry';
 import { createLogger } from '@src/utils/logger';
+import { getAwsClientConfig } from '@src/utils/aws-client.config';
 
 const logger = createLogger({
   correlationId: 'db-pool',
@@ -32,7 +33,7 @@ let cachedConnectionString: string | null = null;
  * The value is cached for the lifetime of the Lambda execution environment.
  */
 async function getConnectionString(
-  secretsClient: SecretsManagerClient = new SecretsManagerClient({}),
+  secretsClient: SecretsManagerClient = new SecretsManagerClient(getAwsClientConfig()),
 ): Promise<string> {
   if (cachedConnectionString) {
     return cachedConnectionString;
