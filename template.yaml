@@ -15,6 +15,7 @@ Globals:
         CLICKUP_SECRET_KEY: clickup_api_token
         GOOGLE_OAUTH_SECRET_KEY: google_oauth2_refresh_token
         API_KEY_SECRET_KEY: api_keys
+        AWS_ENDPOINT_URL: !If [HasCustomEndpoint, !Ref AwsEndpointUrl, !Ref 'AWS::NoValue']
 
 Parameters:
   Environment:
@@ -23,7 +24,13 @@ Parameters:
     AllowedValues:
       - staging
       - production
+      - local
     Description: Deployment environment
+
+  AwsEndpointUrl:
+    Type: String
+    Default: ''
+    Description: Custom AWS endpoint URL for local development (e.g. http://host.docker.internal:4566)
 
   SecretsArn:
     Type: String
@@ -34,24 +41,10 @@ Parameters:
     Default: ''
     Description: NAT Gateway Elastic IP for MongoDB Atlas IP allowlisting
 
-
+Conditions:
+  HasCustomEndpoint: !Not [!Equals [!Ref AwsEndpointUrl, '']]
 
 Resources:
-
-  # ============================================================
-  # Shared Lambda Layer
-  # ============================================================
-  SharedLayer:
-    Type: AWS::Serverless::LayerVersion
-    Properties:
-      LayerName: !Sub clickup-reporting-shared-${Environment}
-      Description: Shared modules - DB connection, ClickUp client, Sheets client, report builder, chart builder, types, date utils, logger
-      ContentUri: src/
-      CompatibleRuntimes:
-        - nodejs20.x
-      RetentionPolicy: Retain
-    Metadata:
-      BuildMethod: nodejs20.x
 
   # ============================================================
   # SQS Dead Letter Queues
@@ -103,8 +96,6 @@ Resources:
       CodeUri: .
       MemorySize: 512
       Timeout: 600
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt SyncDLQ.Arn
@@ -132,8 +123,6 @@ Resources:
       CodeUri: .
       MemorySize: 512
       Timeout: 300
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt DailyReportDLQ.Arn
@@ -161,8 +150,6 @@ Resources:
       CodeUri: .
       MemorySize: 512
       Timeout: 600
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt WeeklyReportDLQ.Arn
@@ -190,8 +177,6 @@ Resources:
       CodeUri: .
       MemorySize: 1024
       Timeout: 900
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt MonthlyReportDLQ.Arn
@@ -219,8 +204,6 @@ Resources:
       CodeUri: .
       MemorySize: 1024
       Timeout: 900
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt ManualTriggerDLQ.Arn
@@ -250,8 +233,6 @@ Resources:
       CodeUri: .
       MemorySize: 1024
       Timeout: 900
-      Layers:
-        - !Ref SharedLayer
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt BackfillDLQ.Arn
@@ -478,10 +459,6 @@ Outputs:
   ReportingApiId:
     Description: API Gateway ID
     Value: !Ref ReportingApi
-
-  SharedLayerArn:
-    Description: Shared Lambda Layer ARN
-    Value: !Ref SharedLayer
 
   SyncFunctionArn:
     Description: Sync Lambda ARN

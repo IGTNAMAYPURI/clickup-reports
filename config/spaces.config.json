@@ -3,7 +3,10 @@
     {
       "space_id": "90166196622",
       "space_name": "Reno FMS",
-      "include_lists": [],
+      "include_lists": [
+        "901613598922",
+        "901613725799"
+      ],
       "exclude_lists": []
     }
   ]

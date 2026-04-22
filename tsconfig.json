@@ -21,6 +21,6 @@
     },
     "types": ["jest", "node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "config/**/*.json"],
   "exclude": ["node_modules", "dist"]
 }

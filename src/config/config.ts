@@ -1,6 +1,7 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import type { Db } from 'mongodb';
+
+import spacesConfigJson from '../../config/spaces.config.json';
+import slaConfigJson from '../../config/sla.config.json';
 
 /**
  * Configurable SLA thresholds used for at-risk task flagging and system behavior.
@@ -48,21 +49,11 @@ const SLA_THRESHOLD_KEYS: (keyof SlaThresholds)[] = [
 ];
 
 /**
- * Resolves the path to a config file.
- * Looks in `config/` relative to the project root.
- */
-function resolveConfigPath(filename: string): string {
-  return path.resolve(process.cwd(), 'config', filename);
-}
-
-/**
- * Loads the spaces configuration from `config/spaces.config.json`.
- * Throws if the file is missing or malformed.
+ * Loads the spaces configuration from the bundled spaces.config.json.
+ * Throws if the config is malformed.
  */
 export function loadSpacesConfig(): SpacesConfig {
-  const filePath = resolveConfigPath('spaces.config.json');
-  const raw = fs.readFileSync(filePath, 'utf-8');
-  const parsed: SpacesConfig = JSON.parse(raw);
+  const parsed = spacesConfigJson as SpacesConfig;
 
   if (!Array.isArray(parsed.spaces)) {
     throw new Error('spaces.config.json must contain a "spaces" array');
@@ -72,23 +63,21 @@ export function loadSpacesConfig(): SpacesConfig {
 }
 
 /**
- * Loads SLA thresholds with precedence: MongoDB > file > defaults.
+ * Loads SLA thresholds with precedence: MongoDB > bundled file > defaults.
  *
  * - Starts with documented defaults (Req 20.4)
- * - Overlays values from `config/sla.config.json` if the file exists (Req 20.2)
+ * - Overlays values from the bundled sla.config.json (Req 20.2)
  * - Overlays values from MongoDB `sla_config` collection when a Db is provided (Req 20.3)
  *
- * @param db Optional MongoDB Db instance. When omitted, only file + defaults are used.
+ * @param db Optional MongoDB Db instance. When omitted, only bundled file + defaults are used.
  */
 export async function loadSlaConfig(db?: Db): Promise<SlaThresholds> {
   // 1. Start with defaults
   const thresholds: SlaThresholds = { ...SLA_DEFAULTS };
 
-  // 2. Overlay from file (if it exists)
+  // 2. Overlay from bundled config file
   try {
-    const filePath = resolveConfigPath('sla.config.json');
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const fileValues: Partial<SlaThresholds> = JSON.parse(raw);
+    const fileValues = slaConfigJson as Partial<SlaThresholds>;
 
     for (const key of SLA_THRESHOLD_KEYS) {
       if (typeof fileValues[key] === 'number') {
@@ -96,7 +85,7 @@ export async function loadSlaConfig(db?: Db): Promise<SlaThresholds> {
       }
     }
   } catch {
-    // File missing or unreadable — continue with defaults
+    // Config parse failed — continue with defaults
   }
 
   // 3. Overlay from MongoDB (highest precedence, Req 20.3)

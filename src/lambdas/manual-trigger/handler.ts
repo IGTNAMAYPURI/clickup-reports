@@ -72,7 +72,6 @@ async function getExpectedApiKey(): Promise<string> {
   const result = await secretsClient.send(
     new GetSecretValueCommand({ SecretId: secretId }),
   );
-
   if (!result.SecretString) {
     throw new Error('API key secret is empty');
   }
